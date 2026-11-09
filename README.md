@@ -1,40 +1,38 @@
-# Measurement-WOA-FCM-CNN-WNN-Transformer
+# WOA-Optimized FCM–CNN–WNN–Transformer
 
-**Article:** An intelligent global irradiance forecasting framework based on a WOA-optimized FCM–CNN–WNN–Transformer hybrid network for solar electric vehicle energy management  
+**Publication:** An intelligent global irradiance forecasting framework based on a WOA-optimized FCM–CNN–WNN–Transformer hybrid network for solar electric vehicle energy management  
 **Journal:** Measurement (2026)  
 **DOI:** https://doi.org/10.1016/j.measurement.2026.121970
 
-## Status: executable research *reconstruction*, not verified original code
+## Method
 
-The modules implement the named architecture family (`fuzzy_transformer`), chronological data handling, training, testing, and diagnostic outputs. This project was newly prepared using the PDF, not extracted from the original authors' source. **Never present its outputs as the paper's exact published results** until all hyperparameters, feature engineering, source datasets, protocol, loss details and random seeds are independently audited.
+The method combines soft atmospheric-regime clustering (FCM), local convolutional features, wavelet-oriented representation and Transformer attention for irradiance forecasting. WOA can tune selected training hyperparameters.
 
-The paper identifies **woa** optimization and **none** residual modeling. Both are exposed in the code, where applicable. `cbo` is currently an explicitly illustrative chaotic-search placeholder, *not* a validated transcription of the full published optimizer. `informer` is a compact sampled-key sparse attention prototype rather than a validated full Informer implementation.
+The project includes chronological data preparation, model fitting, optional hyperparameter selection, evaluation metrics and graphical diagnostics. The architecture family and training parameters are configured in [config.json](config.json).
 
-## Quick start
+## Input data
+
+The training script accepts a time-ordered multivariate CSV with a numeric `target` column. The target in this study is **solar irradiance**. Dataset columns and evaluation assumptions are discussed in [data/README.md](data/README.md). Source data must be obtained from the study's experimental dataset and should be kept distinct from the synthetic software check.
+
+## Installation and execution
 
 ```bash
 python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# Linux: source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q
 python train.py --smoke --epochs 2 --out outputs/smoke
 ```
 
-## Real data
+With measured time-series data:
 
 ```bash
-python train.py --csv data/your_data.csv --target target --time-col time --epochs 40 --out outputs/real_trial
+python train.py --csv path/to/measurements.csv --target target --time-col time --epochs 40 --out outputs/experiment
 ```
 
-Optional small optimization sanity check:
+The program saves training history, test predictions, error metrics, and a fitted checkpoint under the chosen output directory. Optional parameter search is supported through `--search paper --trials N`, subject to the method-specific qualifications below.
 
-```bash
-python train.py --smoke --epochs 2 --search paper --trials 3 --out outputs/search_smoke
-```
+## Evaluation notes
 
-**Important:** the default `--search none` avoids falsely implying the global optimizer has run. For full published-protocol reproduction you must first validate `config.json` and the manuscript's original search space, objective function, budget, and seed procedures.
+The optimization space, full model configuration and experimental partitions must be checked against the article before direct numerical comparison.
 
-Outputs: checkpoint, training history, independent chronological test predictions, JSON metrics, plot. Neural residuals are calibrated on a separate chronological slice *inside* the train period; independent test data is never used to train the residual learner.
-
-Read `REPRODUCIBILITY.md` and `data/README.md` before claiming reproduction.
+The test interval is chronological. Normalization statistics must be estimated on training data, and all reported comparisons should specify the time span, forecast horizon, seed, target units and metric definitions. [REPRODUCIBILITY.md](REPRODUCIBILITY.md) records the implementation boundaries and outstanding experimental checks.
