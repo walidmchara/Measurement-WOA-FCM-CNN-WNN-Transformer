@@ -1,0 +1,15 @@
+{
+  "family": "fuzzy_transformer",
+  "optimizer": "woa",
+  "residual": "none",
+  "n_clusters": 3,
+  "domain": "solar_irradiance",
+  "doi": "10.1016/j.measurement.2026.121970",
+  "lookback": 24,
+  "hidden": 32,
+  "dropout": 0.1,
+  "learning_rate": 0.001,
+  "batch_size": 32,
+  "epochs": 8,
+  "seed": 42
+}
