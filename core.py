@@ -39,30 +39,48 @@ def demo_data(n=240,seed=42,domain='solar_irradiance'):
     return pd.DataFrame({'time':t,'temperature':weather,'cloud_cover':cloud,'solar_elevation':sun,'target':target})
 
 def prepare(df,lookback,feature_cols=None,target='target',time_col='time',clusters=0,seed=42):
+    if lookback < 1:
+        raise ValueError('lookback must be a positive integer')
+    if clusters < 0:
+        raise ValueError('clusters must be nonnegative')
     df=df.copy()
+    if not df.columns.is_unique:
+        raise ValueError('CSV column names must be unique')
     if time_col in df:df=df.sort_values(time_col,kind='stable').reset_index(drop=True)
     if target not in df:raise ValueError(f'missing target column {target!r}')
     if feature_cols is None:
         feature_cols=[c for c in df.select_dtypes(include='number').columns if c!=time_col]
+    else:
+        feature_cols=list(feature_cols)
+        missing=[c for c in feature_cols if c not in df.columns]
+        if missing:raise ValueError(f'missing feature columns: {missing}')
     if target not in feature_cols:feature_cols.append(target)
     if len(df)<max(80,lookback+30):raise ValueError('need >= 80 records with enough historical context')
     for c in feature_cols:df[c]=pd.to_numeric(df[c],errors='coerce')
     if df[feature_cols].isna().any().any():
         raise ValueError('missing/non-numeric data; clean or impute before splitting (train-only imputation recommended)')
+    if not np.isfinite(df[feature_cols].to_numpy(dtype=np.float64)).all():
+        raise ValueError('features and target must contain only finite numeric values')
     X=df[feature_cols].to_numpy(dtype=np.float32)
     y=df[target].to_numpy(dtype=np.float32)
+    if not np.isfinite(X).all() or not np.isfinite(y).all():
+        raise ValueError('features and target exceed the supported numeric range')
     train_end=int(.70*len(df));valid_end=int(.85*len(df))
+    calib_start=int(.85*train_end)
+    if calib_start<=lookback or train_end<=calib_start or valid_end<=train_end or len(df)<=valid_end:
+        raise ValueError('not enough records for nonempty train/calibration/validation/test splits; reduce lookback or add data')
     # Statistics only from historical train period.
     mean=X[:train_end].mean(0);std=X[:train_end].std(0);std=np.maximum(std,1e-6)
     ym=float(y[:train_end].mean());ys=max(float(y[:train_end].std()),1e-6)
     X=(X-mean)/std;yn=(y-ym)/ys
     fcm=None
     if clusters:
+        if clusters > train_end:
+            raise ValueError('clusters cannot exceed the number of training records')
         fcm=FuzzyCMeans(clusters,seed=seed).fit(X[:train_end])
         U=fcm.transform(X).astype(np.float32)
         X=np.concatenate([X,U],axis=1)
     # Define a clean chronological calibration slice *within* train.
-    calib_start=int(.85*train_end)
     windows=np.stack([X[i-lookback:i] for i in range(lookback,len(df))]).astype(np.float32)
     labels=yn[lookback:].astype(np.float32)
     indices=np.arange(lookback,len(df))
