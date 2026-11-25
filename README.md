@@ -16,23 +16,49 @@ The training script accepts a time-ordered multivariate CSV with a numeric `targ
 
 ## Installation and execution
 
+Requires Python 3.10 or newer. The default device is automatic: CUDA is used
+when PyTorch detects it; otherwise training runs on CPU.
+
 ```bash
 python -m venv .venv
+# Linux/macOS:
+source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pytest -q
 python train.py --smoke --epochs 2 --out outputs/smoke
 ```
 
-With measured time-series data:
+The smoke command uses generated data to check that the pipeline runs; it is
+not a scientific experiment. For measured data, supply a CSV with at least
+`max(80, lookback + 30)` chronologically ordered observations, a numeric
+target, and optional numeric predictors:
 
 ```bash
-python train.py --csv path/to/measurements.csv --target target --time-col time --epochs 40 --out outputs/experiment
+python train.py --csv data/measurements.csv --target irradiance \
+  --time-col timestamp --features temperature,humidity,cloud_cover \
+  --epochs 40 --device auto --out outputs/experiment
 ```
 
-The program saves training history, test predictions, error metrics, and a fitted checkpoint under the chosen output directory. Optional parameter search is supported through `--search paper --trials N`, subject to the method-specific qualifications below.
+Use `--device cpu` to force CPU or `--device cuda` to require CUDA. Training
+uses the configured learning rate without search by default. To run the
+repository's paper-inspired WOA search over learning rate and dropout, add
+`--search paper --trials 5`; that search is an implementation choice, not a
+verified reproduction of the article's full optimizer protocol.
+
+The program saves training history, test predictions, error metrics, and a
+fitted checkpoint under the chosen output directory. The CSV and the original
+study dataset are not included; use data you are permitted to use and follow
+its license.
 
 ## Evaluation notes
 
-The optimization space, full model configuration and experimental partitions must be checked against the article before direct numerical comparison.
+The repository does not include the manuscript's full equations, experimental
+configuration, or source dataset. The implementation is therefore a runnable
+research prototype, not a verified bit-for-bit reproduction. In particular,
+FCM memberships are added as model inputs, the wavelet component is a fixed
+Morlet filter bank, and WOA searches only learning rate and dropout. Confirm
+these choices, the paper's data splits, features, forecast horizon, and metrics
+against the article before making scientific comparisons.
 
 The test interval is chronological. Normalization statistics must be estimated on training data, and all reported comparisons should specify the time span, forecast horizon, seed, target units and metric definitions. [REPRODUCIBILITY.md](REPRODUCIBILITY.md) records the implementation boundaries and outstanding experimental checks.

@@ -14,19 +14,22 @@ from training_recovery import EpochCheckpoint
 
 def train_one(split, meta, cfg, epochs=None, quiet=False, recovery=None, resume=False):
     seed_all(cfg['seed'])
-    net=make_model(cfg['family'],meta['input_features'],cfg['hidden'],cfg['dropout'])
+    device=torch.device(cfg['device'])
+    net=make_model(cfg['family'],meta['input_features'],cfg['hidden'],cfg['dropout']).to(device)
     optimizer=torch.optim.Adam(net.parameters(),lr=cfg['learning_rate'])
     loader=DataLoader(TensorDataset(*split['train']),batch_size=cfg['batch_size'],shuffle=True)
-    xval,yval=split['val']; epochs=epochs if epochs is not None else cfg['epochs']
+    xval,yval=(item.to(device) for item in split['val'])
+    epochs=epochs if epochs is not None else cfg['epochs']
     best=math.inf;best_weights=None;history=[];start_epoch=0
     if resume:
         if recovery is None: raise ValueError('Recovery directory is required for resume')
-        state=recovery.restore({'model':net,'optimizer':optimizer})
+        state=recovery.restore({'model':net,'optimizer':optimizer},device=device)
         start_epoch=state['epoch'];best=state['best'];best_weights=state['best_weights'];history=state['history']
         print(f"Resuming after epoch {start_epoch}")
     for epoch in range(start_epoch,epochs):
         net.train();loss_sum=0.0;count=0
         for x,y in loader:
+            x=x.to(device);y=y.to(device)
             optimizer.zero_grad();pred=net(x);loss=(pred-y).square().mean()
             if not torch.isfinite(loss):raise RuntimeError('non-finite training loss')
             loss.backward();torch.nn.utils.clip_grad_norm_(net.parameters(),1.0);optimizer.step()
@@ -44,7 +47,7 @@ def train_one(split, meta, cfg, epochs=None, quiet=False, recovery=None, resume=
 
 def predict(net,data):
     net.eval()
-    with torch.no_grad():return net(data[0]).cpu().numpy()
+    with torch.no_grad():return net(data[0].to(next(net.parameters()).device)).cpu().numpy()
 
 def bounds_to_cfg(p,cfg):
     changed=dict(cfg);changed['learning_rate']=float(np.exp(np.log(1e-4)+p[0]*(np.log(3e-3)-np.log(1e-4))))
@@ -99,10 +102,20 @@ def run(args):
     cfg=json.loads(Path(__file__).with_name('config.json').read_text())
     for k in ['epochs','lookback','batch_size','hidden','seed']:
         if getattr(args,k,None) is not None:cfg[k]=getattr(args,k)
+    if args.device=='cuda' and not torch.cuda.is_available():
+        raise ValueError('--device cuda was requested, but CUDA is not available')
+    cfg['device']=('cuda' if torch.cuda.is_available() else 'cpu') if args.device=='auto' else args.device
+    for key in ('epochs','lookback','batch_size','hidden'):
+        if cfg[key] < 1:raise ValueError(f'{key} must be a positive integer')
+    if cfg['family'] in ('fuzzy_transformer','fuzzy_informer','wavelet_transformer') and cfg['hidden']%4:
+        raise ValueError('hidden must be divisible by 4 for the Transformer attention heads')
+    if args.trials < 1:raise ValueError('--trials must be positive')
     if args.smoke:df=demo_data(domain=cfg['domain'],seed=cfg['seed'])
     elif args.csv:df=pd.read_csv(args.csv)
     else:raise SystemExit('Provide --csv PATH for real data or --smoke for a synthetic test')
-    selected=args.features.split(',') if args.features else None
+    selected=[name.strip() for name in args.features.split(',')] if args.features else None
+    if selected and any(not name for name in selected):
+        raise ValueError('--features must be a comma-separated list of nonempty column names')
     split,meta=prepare(df,cfg['lookback'],feature_cols=selected,target=args.target,time_col=args.time_col,clusters=cfg['n_clusters'],seed=cfg['seed'])
     if any(len(x[0])<1 for x in split.values()):raise ValueError('empty subset: reduce lookback or increase dataset')
     technique=(cfg['optimizer'] if args.search=='paper' else args.search)
@@ -141,7 +154,7 @@ def run(args):
         corrected=neural+model.predict(residual_features(net,split['test'],neural))
         residual_fitted=True
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
-    torch.save({'model_state_dict':net.state_dict(),'config':cfg,'meta':meta},out/'checkpoint.pt')
+    torch.save({'model_state_dict':{k:v.cpu() for k,v in net.state_dict().items()},'config':cfg,'meta':meta},out/'checkpoint.pt')
     pd.DataFrame(history).to_csv(out/'training_log.csv',index=False)
     pd.DataFrame({'actual':ground,'neural_prediction':neural,'final_prediction':corrected}).to_csv(out/'predictions.csv',index=False)
     result={'paper_doi':cfg['doi'],'run_kind':'synthetic smoke test' if args.smoke else 'user-provided data experiment',
@@ -163,6 +176,7 @@ if __name__=='__main__':
     ap.add_argument('--csv');ap.add_argument('--smoke',action='store_true');ap.add_argument('--features',help='comma-separated feature column names; target is always appended')
     ap.add_argument('--target',default='target');ap.add_argument('--time-col',default='time');ap.add_argument('--lookback',type=int)
     ap.add_argument('--epochs',type=int);ap.add_argument('--batch-size',type=int);ap.add_argument('--hidden',type=int);ap.add_argument('--seed',type=int)
+    ap.add_argument('--device',choices=['auto','cpu','cuda'],default='auto',help='auto uses CUDA when available, otherwise CPU')
     ap.add_argument('--search',choices=['paper','none','woa','cbo','optuna'],default='none',help='paper selects optimizer declared in associated paper')
     ap.add_argument('--trials',type=int,default=5);ap.add_argument('--out',default='outputs/latest')
     ap.add_argument('--checkpoint-dir',help='Persistent recovery path (Drive or mounted volume)')

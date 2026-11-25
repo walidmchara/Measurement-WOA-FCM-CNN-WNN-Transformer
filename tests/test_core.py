@@ -1,5 +1,6 @@
 import json,sys
 from pathlib import Path
+import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import torch
@@ -31,3 +32,15 @@ def test_temporal_splits_and_scaler():
 def test_metrics():
     x=metrics([1,2,3],[1,2,3],'battery_soh')
     assert x['MAE']==0 and x['RMSE']==0 and x['R2']==1
+
+def test_prepare_rejects_nonfinite_values_and_unknown_features():
+    df=demo_data(180)
+    df.loc[10,'cloud_cover']=np.inf
+    with pytest.raises(ValueError,match='finite'):
+        prepare(df,24)
+    with pytest.raises(ValueError,match='missing feature'):
+        prepare(demo_data(180),24,feature_cols=['not_a_column'])
+
+def test_prepare_allows_short_calibration_slice():
+    split,_=prepare(demo_data(180),24,clusters=2)
+    assert len(split['calib'][0])>0
